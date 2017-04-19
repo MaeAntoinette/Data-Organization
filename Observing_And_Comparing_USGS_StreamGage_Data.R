@@ -2,50 +2,53 @@ setwd("F:/USGSStreamGauge/ImperialValley")
 getwd()
 load("F:/RStudio/Scripts/Observing_And_Comparing_USGS_StreamGage_Data_workenv.RData")
 
-
 #Background: EEFlux ET is generated using remotely sensed data at moderate to low resolution. The combination of global 
-#climate grids and Landsat 30m images are downscaled and resampled to generate 30m daily ETa. I use EEFlux ET data for 
+#climate grids and Landsat 30m images are downscaled and resampled to generate 30m daily ETa. I use EEFlux ET data 
 #to quantify water consumption (ET) across Imperial Valley croplands, particularly to quantify and locate
 #high water-use croplands that could be taken out of production for potential mitigation flows into the Salton Sea. 
-#However, the reliability and validity of EEFlux ET has yet been assessed at the regional scale. 
+#However, the reliability and validity of EEFlux ET to quantify potential flows has yet been assessed at the regional scale. 
 
-#I've predownloaded and saved USGS stream gage data. However, you may download gage data directly in R using the  
-#"dataRetrival" package. 
+#Objective: I use a surface-water balance of annual canal flows that will be compared to annual EEFlux volumetric ET. 
+#ET is solved residually as surface inflow less surface outflow following methods proposed in 
+#Allen et al. (2005), Clemmens (2008), and Burt (1999) which all describe the Imperial Valley 
+#as having a simplistic hydrologic structure, with negligible flows at the aquifer level and
+#tile drains intercepting most subsurface flows. EEFlux ET data will be calibrated according to the observed, canal data. 
 
-#Objective: I use a surface-water balance of annual canal flows through the Imperial Valley solving for a residual ET
-#that will be compared to annual EEFlux volumetric ET. ET is solved residually as surface inflow less surface outflow 
-#following methods proposed in Allen et al. (2005), Clemmens (2008), and Burt (1999) which all describe the Imperial Valley 
-#as having a simplistic hydrologic structure, with tile drains intercepting most subsurface flows 
-#and negligible groundwater flows. EEFlux ET data will be calibrated according to the observed, canal data. 
+#I've predownloaded and saved USGS stream gage data to a local network. 
+#However, you may download gage data directly in R using the "dataRetrival" package. 
+
+#Data: Stream/Canal data from All-American Canal Below Pilot Knob, Coachella Canal, New River at Calexico, 
+#New River at Westmorland and Alamo River at Niland. The last two are considered outflow gages from the IV into the Salton Sea. 
 
 #Results: The following script will create figures and tables of observed canal data, estimated ET from EEFlux, and stats. 
 #MAE, SD, CV, and RSME values are provided (labeled as: "ET.[whatever the stat is]"). 
 
 
 #---------- Importing and Converting Data --------
-#Identify your inputs.
+#Identify your inflows.
 Input1 = read.csv("Discharge_AAC_BlwPK_Inflow_Julian.csv", header = TRUE, sep = ",")
 Input2 = read.csv("Discharge_AAC_Coachella_Inflow_Julian.csv", header = TRUE, sep = ",")
 Input3 = read.csv("Discharge_NR_Calexico_Inflow_Julian.csv", header = TRUE, sep = ",")
-#Identify your outputs.
+#Identify your outflows.
 Output1 = read.csv("Discharge_AlamoR_Outflow_Julian.csv", header = TRUE, sep = ",")
 Output2 = read.csv("Discharge_NR_Outflow_Julian.csv", header = TRUE, sep = ",")
 
-#Change to date format.
+#Change your dates to date format.
 Input1$Date <- as.Date(Input1$Date, "%m/%d/%Y")
 Input2$Date <- as.Date(Input2$Date, "%m/%d/%Y")
 Input3$Date <- as.Date(Input3$Date, "%m/%d/%Y")
 Output1$Date <- as.Date(Output1$Date, "%m/%d/%Y")
 Output2$Date <- as.Date(Output2$Date, "%m/%d/%Y")
 
-#Adjust your Julian date. 
+#Change your Julian date to Julian format. 
 Input1$JulianDay <- format(Input1$Date, "%j")
 Input2$JulianDay <- format(Input2$Date, "%j")
 Input3$JulianDay <- format(Input3$Date, "%j")
 Output1$JulianDay <- format(Output1$Date, "%j")
 Output2$JulianDay <- format(Output2$Date, "%j")
 
-#IDENTIFY YOUR YEARS, MONTHS, and DAYS FOR YEARLY/MONTHLY ESTIMATION
+#To aggregate data to daily or longer time periods, we need a determined set of years/months/days. 
+
 #Input1 PK
 yearPK = as.numeric(format(strptime(Input1[,3],format="%Y-%m-%d"),"%Y"))
 monthPK = as.numeric(format(strptime(Input1[,3],format="%Y-%m-%d"),"%m"))
@@ -67,20 +70,21 @@ yearNRout = as.numeric(format(strptime(Output2[,3],format="%Y-%m-%d"),"%Y"))
 monthNRout = as.numeric(format(strptime(Output2[,3],format="%Y-%m-%d"),"%m"))
 dayNRout = as.numeric(format(strptime(Output2[,3],format="%Y-%m-%d"),"%d"))
 
-#Rename your Q_cfs by adding site name in front 
+#Rename your discharge data column header (Q_cfs) by adding site name in front. This is useful when you merge the gage data
+#together in one df.
 colnames(Input1)[colnames(Input1)=="Q_cfs"] <- "PK.Q_cfs"
 colnames(Input2)[colnames(Input2)=="Q_cfs"] <- "CC.Q_cfs"
 colnames(Input3)[colnames(Input3)=="Q_cfs"] <- "NR.Q_cfs"
 colnames(Output1)[colnames(Output1)=="Q_cfs"] <- "ARout.Q_cfs"
 colnames(Output2)[colnames(Output2)=="Q_cfs"] <- "NRout.Q_cfs"
 
-#Coachella Canal has missing data. Clemmens (2008) observed the gage at PK is about 15% more than what reaches the CC. 
-#Use your data to verify this average change. 
-
+#Note that Coachella Canal has missing data. Clemmens (2008) observed that the measurements at PK are about 15% more 
+#than what reaches the CC on average. Use your data to verify this average change. 
 PK.CC.temp.change = merge(Input1,Input2,by="Date")
 PK.CC.temp.change$PercentChange <- ((PK.CC.temp.change$PK.Q_cfs - PK.CC.temp.change$CC.Q_cfs)/PK.CC.temp.change$PK.Q_cfs)*100
 PK.CC.temp.change$PercentReceived <- 100 - PK.CC.temp.change$PercentChange
 
+#there are too many columns once you merge. Removing them is a personal preference...
 drop.temp <- c("ID.x", "Control.x", "PK.Q_cfd", "PK.Q_cms", "PK.Q_cmd", "Type.y", "ID.y", "JulianDay.y", "Control.y", "CC.Q_cfd", "CC.Q_cms", "CC.Q_cmd")
 
 PK.CC.Change = PK.CC.temp.change[,!(names(PK.CC.temp.change) %in% drop.temp)]
@@ -88,16 +92,19 @@ PK.CC.Change[,6] <-round(PK.CC.Change[,6],2)
 PK.CC.Change[,7] <-round(PK.CC.Change[,7],2)
 PK.CC.Change$Date <- as.Date(PK.CC.Change$Date, "%m/%d/%Y") 
  
+#Calculate the average change. Out of curiousity, what is the median and sd? 
 mean(PK.CC.Change$PercentReceived, na.rm=TRUE)
 median(PK.CC.Change$PercentReceived, na.rm=TRUE)
 sd(PK.CC.Change$PercentReceived,na.rm=TRUE)
 sd(PK.CC.Change$PercentReceived,na.rm=TRUE)/(mean(PK.CC.Change$PercentReceived, na.rm=TRUE))
-#About 11%
+#About 11%. I'll use this value to fill in any NAs in the Coachella Canal Q data. 
 
-#Fill the NAs in your Coachella data 
+#Fill the NAs in your Coachella data. 
+#This line is basically saying, "In Input2, identify column titled 'CC.Q_cfs'. If this column has rows with NA, get the Q value 
+#of the same row/date from the PK Q data and multiply it by 10.99%. Whatever it is, paste it into the CC row.'" 
 Input2 <- transform(Input2, CC.Q_cfs = ifelse(is.na(Input2$CC.Q_cfs), PK.CC.Change$PK.Q_cfs*0.1099, CC.Q_cfs))
 
-#Convert to cubic feet day (....why did I do this?)
+#Convert to cubic feet day (....why did I do this? I don't use it but if youre interested in maintaining imperial units, feel free!)
 Input1$PK.Q_cfd <- Input1$PK.Q_cfs*86400
 Input2$CC.Q_cfd <- Input2$CC.Q_cfs*86400
 Input3$NR.Q_cfd <- Input3$NR.Q_cfs*86400
@@ -118,7 +125,7 @@ Input3$NR.Q_cmd <- Input3$NR.Q_cms*86400
 Output1$ARout.Q_cmd <- Output1$ARout.Q_cms*86400
 Output2$NRout.Q_cmd <- Output2$NRout.Q_cms*86400
 
-#Convert to MCM per day.
+#Convert to MCM per day. The Q data is going to be high, lets convert to million cubic meters. 
 Input1$PK.Q_mcmd <- Input1$PK.Q_cmd/1000000
 Input2$CC.Q_mcmd <- Input2$CC.Q_cmd/1000000
 Input3$NR.Q_mcmd <- Input3$NR.Q_cmd/1000000
@@ -137,34 +144,37 @@ write.csv(Output2, "Discharge_NR_Outflow_Julian_Converts.csv")
 
 
 #--------------- Aggregating Data ----------------
-#SUMMING YOUR DAILY AVERAGE DISCHARGE to YEARLY Discharge
+#SUMMING YOUR DAILY AVERAGE DISCHARGE to YEARLY Discharge. 
+#This is where your year/month/day data created which was created in the beginning becomes useful... 
 PK.ann.Q <- aggregate(as.numeric(Input1$PK.Q_mcmd),by=list(yearPK),FUN="sum") 
 CC.ann.Q <- aggregate(as.numeric(Input2$CC.Q_mcmd),by=list(yearCC),FUN="sum")
 NR.ann.Q <- aggregate(as.numeric(Input3$NR.Q_mcmd),by=list(yearNR),FUN="sum")
 ARout.ann.Q <- aggregate(as.numeric(Output1$ARout.Q_mcmd),by=list(yearARout),FUN="sum")
 NRout.ann.Q <- aggregate(as.numeric(Output2$NRout.Q_mcmd),by=list(yearNRout),FUN="sum")
 
-#Rename your first column "Group.1" to Year
+#Rename your first column "Group.1" to "Year"
 colnames(PK.ann.Q)[colnames(PK.ann.Q)=="Group.1"] <- "Year"
 colnames(CC.ann.Q)[colnames(CC.ann.Q)=="Group.1"] <- "Year"
 colnames(NR.ann.Q)[colnames(NR.ann.Q)=="Group.1"] <- "Year"
 colnames(ARout.ann.Q)[colnames(ARout.ann.Q)=="Group.1"] <- "Year"
 colnames(NRout.ann.Q)[colnames(NRout.ann.Q)=="Group.1"] <- "Year"
 
-#Rename your annual Q estimates 
+#Rename your "x" column (annual Q estimates) to an appropriate header.
 colnames(PK.ann.Q)[colnames(PK.ann.Q)=="x"] <- "PK.Q_Sum_mcmy"
 colnames(CC.ann.Q)[colnames(CC.ann.Q)=="x"] <- "CC.Q_Sum_mcmy"
 colnames(NR.ann.Q)[colnames(NR.ann.Q)=="x"] <- "NR.Q_Sum_mcmy"
 colnames(ARout.ann.Q)[colnames(ARout.ann.Q)=="x"] <- "ARout.Q_Sum_mcmy"
 colnames(NRout.ann.Q)[colnames(NRout.ann.Q)=="x"] <- "NRout.Q_Sum_mcmy"
 
-#Merge all yearly discharge data
+#Merge all yearly mcm discharge data. 
+#I normally create a temp df just incase I mess up or want to change the lyt of the df. 
+#Again, its preference. Or perfectionism... who knows? 
 all.temp = merge(PK.ann.Q,CC.ann.Q,by="Year")
 all.temp = merge(all.temp, NR.ann.Q,by="Year")
 all.temp = merge(all.temp, ARout.ann.Q,by="Year")
 all.temp = merge(all.temp, NRout.ann.Q,by="Year")
 
-#Rename your working temp file
+#Temp df looks good, save as a more appropriate name.
 IV.ann.Q = all.temp
 IV.ann.Q$Total.Inflow_mcmy <- ((IV.ann.Q$PK.Q_Sum_mcmy-IV.ann.Q$CC.Q_Sum_mcmy) + IV.ann.Q$NR.Q_Sum_mcmy)
 IV.ann.Q$Total.Outflow_mcmy <- IV.ann.Q$ARout.Q_Sum_mcmy + IV.ann.Q$NRout.Q_Sum_mcmy
@@ -173,7 +183,7 @@ IV.ann.Q$ET.Q_Sum_mcmy <- IV.ann.Q$Total.Inflow_mcmy - IV.ann.Q$Total.Outflow_mc
 
 
 # ------------ Validating your Data --------------
-#Bring in your EEFlux water balance volum. ET maps. 
+#Bring in your EEFlux ET maps. These maps are masked to the water balance boundary. See Study Area map. 
 EEFlux.fold <- "F:/EEFlux/P39R37/"
 EEFlux.WB.fold <- "/ET/WaterBalance/"
 
@@ -191,7 +201,7 @@ EE.WB.2015 <- raster(list.files(paste0(EEFlux.fold,"2015",EEFlux.WB.fold),patt =
 EE.WB.stack <- stack(EE.WB.2010,EE.WB.2011,EE.WB.2012,EE.WB.2013,EE.WB.2014,EE.WB.2015)
 plot(EE.WB.stack)
 
-EE.WB.sums <- extract(EE.WB.stack,WB.shp,method = "simple",fun=sum,na.rm = TRUE)
+EE.WB.sums <- extract(EE.WB.stack,WB.shp,method = "simple",fun=sum,na.rm = TRUE) #Get the sum of the pixel values in each raster.
 EE.wb.sums.df <- setNames(data.frame(seq(2010,2015,by=1),t(EE.WB.sums)),c("Year","EEFlux_WB_ET_MCMY"))
 rownames(EE.wb.sums.df) <- 1:nrow(EE.wb.sums.df)
 EE.wb.sums.df$StreamGage_MCMY <- IV.ann.Q$ET.Q_Sum_mcmy[IV.ann.Q$Year == c("2010","2011","2012","2013","2014","2015")]
@@ -205,7 +215,7 @@ ET.RSME <- round(sqrt(mean((EE.wb.sums.df$StreamGage_MCMY - EE.wb.sums.df$EEFlux
 ET.stats <- lm(EEFlux_WB_ET_MCMY ~ StreamGage_MCMY,EE.wb.sums.df)
 ET.R2 <- round(summary(ET.stats)$r.squared,digits = 2)
 
-#Create a table for your observed data 
+#Create a table for your observed data using htmlTable. 
 ET.mattab.header <- c("Year","Stream Gage ET (MCM)","EEFlux ET (MCM)"," ", " ")
 ET.mattab.years <- matrix(seq(2010,2015,by = 1))
 ET.mattab.SGvol <- matrix(round(EE.wb.sums.df$StreamGage_MCMY,digits = 0))
@@ -229,7 +239,7 @@ htmlTable(ET.mattab,
 
 
 #---------------- Calibrating EEFlux Data ---------
-EE.wb.sums.df$CalibratedEEFlux <- EE.wb.sums.df$EEFlux_WB_ET_MCMY*0.75 #calibrating to 75% of the annual EEflux ET
+EE.wb.sums.df$CalibratedEEFlux <- EE.wb.sums.df$EEFlux_WB_ET_MCMY*0.75 #calibrating to 75% of the annual EEflux ET. Prob will change.
 
 
 #---------------- Plotting your data ---------------
